@@ -1,0 +1,12 @@
+# secrets — never commit the real key
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os
+.DS_Store
+Thumbs.db

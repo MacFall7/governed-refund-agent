@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Governed Refund Agent</title>
+<style>
+  :root {
+    --bg:#0f0e0d; --card:#ffffff; --ink:#1a1a1a; --muted:#6b7280;
+    --orange:#ff6633; --teal:#00d4aa; --red:#ef4444;
+    --panel:#11151c; --panel-ink:#d6deeb; --line:#e5e7eb;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+         background:var(--bg); color:var(--ink); height:100vh; display:flex; flex-direction:column; }
+  header { padding:16px 24px; color:#fff; }
+  header h1 { margin:0; font-size:18px; font-weight:700; letter-spacing:.2px; }
+  header .flow { margin-top:4px; font-size:12px; color:#9aa4b2; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  header .flow b { color:var(--orange); }
+  main { flex:1; display:flex; gap:16px; padding:0 16px 16px; min-height:0; }
+  .col { background:var(--card); border-radius:12px; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  .chat { flex:1.1; }
+  .admin { flex:1; background:var(--panel); }
+  .col h2 { margin:0; padding:12px 16px; font-size:13px; text-transform:uppercase; letter-spacing:.6px; border-bottom:1px solid var(--line); }
+  .admin h2 { color:#9aa4b2; border-color:#1f2733; }
+  .msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .bubble { max-width:80%; padding:10px 13px; border-radius:14px; font-size:14px; line-height:1.45; }
+  .user { align-self:flex-end; background:var(--orange); color:#fff; border-bottom-right-radius:4px; }
+  .bot  { align-self:flex-start; background:#f3f4f6; color:var(--ink); border-bottom-left-radius:4px; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; padding:0 16px 8px; }
+  .chip { font-size:12px; border:1px solid var(--line); background:#fff; border-radius:999px; padding:6px 10px; cursor:pointer; color:var(--muted); }
+  .chip:hover { border-color:var(--orange); color:var(--orange); }
+  .inputbar { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+  .inputbar input { flex:1; padding:11px 13px; border:1px solid var(--line); border-radius:10px; font-size:14px; outline:none; }
+  .inputbar input:focus { border-color:var(--orange); }
+  .inputbar button { padding:11px 18px; background:var(--orange); color:#fff; border:none; border-radius:10px; font-weight:600; cursor:pointer; }
+  .log { flex:1; overflow-y:auto; padding:14px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; color:var(--panel-ink); }
+  .step { padding:8px 10px; border-radius:8px; margin-bottom:8px; background:#161b24; border-left:3px solid #2b3442;
+          opacity:0; transform:translateY(6px); animation:in .25s forwards; }
+  @keyframes in { to { opacity:1; transform:none; } }
+  .step .k { color:#7f8ea3; }
+  .step.call  { border-left-color:var(--teal); }
+  .step.result{ border-left-color:#3b4658; color:#9aa4b2; white-space:pre-wrap; }
+  .step.gate-APPROVED { border-left-color:var(--teal); }
+  .step.gate-DENIED, .step.gate-ESCALATE { border-left-color:var(--red); }
+  .verdict { font-weight:700; font-size:13px; letter-spacing:.5px; }
+  .verdict.APPROVED { color:var(--teal); } .verdict.DENIED, .verdict.ESCALATE { color:var(--red); }
+  .rule { display:flex; gap:6px; margin-top:3px; } .rule .ok{color:var(--teal);} .rule .no{color:var(--red);}
+  .receipt { margin-top:6px; padding:10px; border:1px dashed var(--teal); border-radius:8px; color:#cdeee4; }
+  .receipt b { color:var(--teal); }
+  .empty { color:#5a6675; font-style:italic; padding:8px 10px; }
+  .turn-head { color:#8a97a8; font-size:11.5px; margin:14px 0 8px; padding-top:10px; border-top:1px dashed #232c38;
+               opacity:0; transform:translateY(6px); animation:in .25s forwards; }
+  .turn-head:first-child { border-top:none; padding-top:0; margin-top:2px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Governed Refund Agent</h1>
+    <div class="flow">Proposer&nbsp;<b>&rarr;</b>&nbsp;Gate&nbsp;<b>&rarr;</b>&nbsp;Executor&nbsp;<b>&rarr;</b>&nbsp;Receipt &nbsp;&middot;&nbsp; the model proposes, the gate decides</div>
+  </header>
+  <main>
+    <section class="col chat">
+      <h2>Customer Chat</h2>
+      <div class="msgs" id="msgs"></div>
+      <div class="chips" id="chips"></div>
+      <div class="inputbar">
+        <input id="input" placeholder="Type a message... e.g. I'd like a refund for order 1001" autocomplete="off" />
+        <button id="send">Send</button>
+      </div>
+    </section>
+    <section class="col admin">
+      <h2>Agent Reasoning &middot; Admin</h2>
+      <div class="log" id="log"><div class="empty">Reasoning trace appears here as the agent works...</div></div>
+    </section>
+  </main>
+
+<script>
+const msgs = document.getElementById('msgs');
+const log  = document.getElementById('log');
+const input = document.getElementById('input');
+const history = [];
+
+const SUGGESTIONS = [
+  "I'd like a refund for order 1001",
+  "Refund order 1007 please",
+  "I want a refund on order 1010",
+  "Refund order 1012",
+];
+const chips = document.getElementById('chips');
+SUGGESTIONS.forEach(s => {
+  const c = document.createElement('div'); c.className='chip'; c.textContent=s;
+  c.onclick = () => { input.value = s; send(); };
+  chips.appendChild(c);
+});
+
+function bubble(text, who){
+  const b = document.createElement('div');
+  b.className = 'bubble ' + who; b.textContent = text;
+  msgs.appendChild(b); msgs.scrollTop = msgs.scrollHeight;
+}
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function placeholderIfEmpty(){
+  if(!log.querySelector('.step') && !log.querySelector('.turn-head')){
+    log.innerHTML = '<div class="empty">Reasoning trace appears here as the agent works...</div>';
+  }
+}
+
+function renderTrace(userText, trace, receipt){
+  if(!trace.length && !receipt){ placeholderIfEmpty(); return; }
+  const ph = log.querySelector('.empty'); if(ph) ph.remove();
+  let i = 0;
+  const head = document.createElement('div');
+  head.className = 'turn-head';
+  head.innerHTML = '&#9655; ' + esc(userText);
+  log.appendChild(head);
+  trace.forEach(step => {
+    const el = document.createElement('div');
+    el.style.animationDelay = (++i * 0.22) + 's';
+    if(step.type === 'tool_call'){
+      el.className = 'step call';
+      el.innerHTML = '<span class="k">call</span> &rarr; ' + esc(step.name) + '(' + esc(JSON.stringify(step.args).slice(1,-1)) + ')';
+    } else if(step.type === 'tool_result'){
+      el.className = 'step result';
+      el.innerHTML = '<span class="k">result</span> ' + esc(JSON.stringify(step.result));
+    } else if(step.type === 'gate'){
+      el.className = 'step gate-' + step.decision;
+      let html = '<span class="verdict ' + step.decision + '">GATE: ' + step.decision + '</span>';
+      (step.rules_evaluated||[]).forEach(r => {
+        html += '<div class="rule"><span class="'+(r.passed?'ok':'no')+'">'+(r.passed?'&#10003;':'&#10007;')+'</span>'
+              + '<span>'+esc(r.rule)+' '+esc(r.name)+' &mdash; '+esc(r.detail)+'</span></div>';
+      });
+      el.innerHTML = html;
+    } else if(step.type === 'error'){
+      el.className = 'step gate-DENIED';
+      el.innerHTML = '<span class="verdict DENIED">ERROR</span><div class="rule"><span>'+esc(step.detail)+'</span></div>';
+    }
+    log.appendChild(el);
+  });
+  if(receipt){
+    const r = document.createElement('div');
+    r.className = 'step receipt'; r.style.animationDelay = (++i*0.22)+'s';
+    r.innerHTML = '<b>RECEIPT</b> '+esc(receipt.receipt_id)+'<br>order '+esc(receipt.order_id)
+                + ' &middot; $'+esc(receipt.amount)+' &middot; '+esc(receipt.issued)
+                + '<br><span class="k">sha256</span> '+esc(receipt.hash.slice(0,24))+'&hellip;';
+    log.appendChild(r);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function appendError(msg){
+  const ph = log.querySelector('.empty'); if(ph) ph.remove();
+  const e = document.createElement('div');
+  e.className = 'step gate-DENIED';
+  e.innerHTML = '<span class="verdict DENIED">ERROR</span><div class="rule"><span>' + esc(msg) + '</span></div>';
+  log.appendChild(e); log.scrollTop = log.scrollHeight;
+}
+
+async function send(){
+  const text = input.value.trim();
+  if(!text) return;
+  input.value = '';
+  bubble(text, 'user');
+  history.push({role:'user', content:text});
+  const ph = log.querySelector('.empty'); if(ph) ph.remove();
+  const work = document.createElement('div'); work.className = 'empty'; work.textContent = 'working...';
+  log.appendChild(work); log.scrollTop = log.scrollHeight;
+
+  let data;
+  try {
+    const res = await fetch('/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message:text, history})
+    });
+    data = await res.json();
+  } catch(e){
+    work.remove();
+    bubble('Network error talking to the agent.', 'bot');
+    appendError('Transport: ' + e.message);
+    return;
+  }
+  work.remove();
+
+  bubble(data.reply == null ? '(no reply)' : data.reply, 'bot');
+  history.push({role:'assistant', content:data.reply || ''});
+  try { renderTrace(text, data.trace || [], data.receipt); }
+  catch(err){ appendError('Render: ' + err.message); }
+  if(data.error){ appendError('Server: ' + data.error); }
+}
+
+document.getElementById('send').onclick = send;
+input.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+bubble("Hi! I'm your support assistant. Tell me which order you'd like a refund for and I'll take a look.", 'bot');
+</script>
+</body>
+</html>
