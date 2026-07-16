@@ -4,9 +4,13 @@ An AI customer-support agent that processes or denies e-commerce refunds. The
 language model talks to the customer and **proposes** an action — but a
 deterministic **policy gate** decides whether the refund actually executes.
 
+> **Maturity:** prototype
+>
+> Reference implementation using in-memory mock customer data, a mock refund executor, and a pinned date for reproducible demonstrations. It is not connected to a live commerce or payment system.
+
 > **One idea:** the model never has the pen. It can be charming, jailbroken, or
-> wrong; the gate still holds the line. Correctness does not depend on how good
-> the model is.
+> wrong; the gate still holds the line. Refund authorization for the modeled policy rules is enforced
+> outside the language model.
 
 ---
 
@@ -71,7 +75,7 @@ The policy itself lives in [`policy.md`](policy.md).
 runs every rule in pure Python and returns `APPROVED` / `DENIED` / `ESCALATE`
 with a per-rule breakdown. The agent's system prompt forbids it from telling a
 customer a refund is approved unless the gate said so — and because the gate,
-not the model, executes, an insistent or adversarial customer cannot move it.
+not the model, executes, within the demonstrated execution path, user persuasion cannot bypass the deterministic gate.
 The agent loop is also bounded (`MAX_STEPS`) so it can't spin forever.
 
 Swapping LLM providers is a one-function change (`_call_llm` in `agent.py`).
@@ -110,3 +114,9 @@ governed-refund-agent/
 ├── verify.py          # deterministic gate test (no API key)
 └── requirements.txt
 ```
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE).
