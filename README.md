@@ -74,8 +74,9 @@ The policy itself lives in [`policy.md`](policy.md).
 `propose_refund()` in `tools.py` is the only path that can issue a refund. It
 runs every rule in pure Python and returns `APPROVED` / `DENIED` / `ESCALATE`
 with a per-rule breakdown. The agent's system prompt forbids it from telling a
-customer a refund is approved unless the gate said so — and because the gate,
-not the model, executes, within the demonstrated execution path, user persuasion cannot bypass the deterministic gate.
+customer a refund is approved unless the gate said so. The gate — not the
+model — executes the refund. Within the demonstrated execution path, user
+persuasion cannot bypass the deterministic policy checks.
 The agent loop is also bounded (`MAX_STEPS`) so it can't spin forever.
 
 Swapping LLM providers is a one-function change (`_call_llm` in `agent.py`).
@@ -97,7 +98,7 @@ Swapping LLM providers is a one-function change (`_call_llm` in `agent.py`).
    "this is the only thing that can approve") → `agent.py` (proposer-only,
    bounded loop).
 6. **Reasoning logs (1 min).** Run `python verify.py` — 6/6 — and show the live
-   trace in the admin panel. Close on: *correctness is independent of the model.*
+   trace in the admin panel. Close on: *the model can vary; the authorization boundary remains deterministic.*
 
 ---
 
