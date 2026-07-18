@@ -62,7 +62,7 @@ def read_refund_policy() -> dict:
 
 # --- The gate: deterministic, the only thing that can approve ---------------
 
-def _evaluate(order: dict) -> dict:
+def _evaluate(order: dict, requested_amount: float | None = None) -> dict:
     """Run every rule. Returns per-rule pass/fail and an overall verdict."""
     checks = []
     cust_id = order["customer_id"]
@@ -84,6 +84,13 @@ def _evaluate(order: dict) -> dict:
                    "passed": not within_cooldown,
                    "detail": f"last refund {last.isoformat()}" if last else "no prior refund"})
 
+    amount_ok = requested_amount is None or abs(requested_amount - order["amount"]) < 0.005
+    checks.append({"rule": "R5", "name": "amount equals order total",
+                   "passed": amount_ok,
+                   "detail": (f"requested {requested_amount} vs order total {order['amount']}"
+                              if requested_amount is not None else
+                              f"refund fixed to order total {order['amount']}")})
+
     approved = all(c["passed"] for c in checks)
     failed = [c for c in checks if not c["passed"]]
     return {
@@ -93,11 +100,11 @@ def _evaluate(order: dict) -> dict:
     }
 
 
-def propose_refund(order_id: str) -> dict:
+def propose_refund(order_id: str, requested_amount: float | None = None) -> dict:
     """The model calls this to act. The gate — not the model — decides.
 
-    On approval the mock refund executes and a signed receipt is returned.
-    On denial nothing changes and the reasons are returned.
+    On approval the mock refund executes and a sha256 hash receipt (unsigned)
+    is returned. On denial nothing changes and the reasons are returned.
     """
     order = ORDERS.get(str(order_id).strip())
     if not order:
@@ -108,7 +115,7 @@ def propose_refund(order_id: str) -> dict:
             "rules_evaluated": [],
         }
 
-    verdict = _evaluate(order)
+    verdict = _evaluate(order, requested_amount)
     if not verdict["approved"]:
         return {
             "decision": "DENIED",
@@ -173,6 +180,7 @@ TOOL_SCHEMA = [
         "name": "propose_refund",
         "description": "Propose a refund for an order. A deterministic policy gate decides approve/deny and executes if approved. You must use this to act on any refund — never tell a customer a refund is approved without it.",
         "parameters": {"type": "object", "properties": {
-            "order_id": {"type": "string", "description": "The order ID to refund."}},
+            "order_id": {"type": "string", "description": "The order ID to refund."},
+            "requested_amount": {"type": "number", "description": "Optional: the amount the customer asked for. If it differs from the order total the gate denies (R5). Omit to refund the order total."}},
             "required": ["order_id"]}}},
 ]

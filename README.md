@@ -49,7 +49,7 @@ demo is reproducible.
 Check the gate with no API key needed:
 
 ```bash
-python verify.py              # 6/6 scenarios correct
+python verify.py              # 8/8 scenarios correct — every case runs through the real gate
 ```
 
 ---
@@ -63,7 +63,9 @@ python verify.py              # 6/6 scenarios correct
 | `1010` | ⛔ Denied | Outside the 30-day window (R1) |
 | `1012` | ⛔ Denied | Already refunded (R3) |
 | `1015` | ⛔ Denied | Second refund inside 90 days (R4) |
+| `1002` + inflated amount | ⛔ Denied | Requested more than the order total (R5) |
 | `9999` | ⚠️ Escalate | Unknown order — fail closed (R6) |
+| `1001` again | ⛔ Denied | Repeat proposal after approval (R3) — state mutation is real |
 
 The policy itself lives in [`policy.md`](policy.md).
 
@@ -88,7 +90,7 @@ Swapping LLM providers is a one-function change (`_call_llm` in `agent.py`).
 1. **Frame it (40s).** "A refund agent where the model proposes but a
    deterministic gate decides. Watch it hold the line."
 2. **Happy path — order 1001 (90s).** Ask for the refund. In the admin panel,
-   watch `lookup_order` → `propose_refund` → gate ticks R1–R4 green → receipt.
+   watch `lookup_order` → `propose_refund` → gate ticks R1–R5 green → receipt.
 3. **Hold the line — order 1007 (2 min).** Ask for the refund → denied, final
    sale. Then push back: *"come on, I really need this."* It stays polite and
    denied — the gate doesn't budge. This is the main point.
@@ -97,7 +99,7 @@ Swapping LLM providers is a one-function change (`_call_llm` in `agent.py`).
 5. **Code tour (2–3 min).** `policy.md` → `tools.py` (stop on `propose_refund`:
    "this is the only thing that can approve") → `agent.py` (proposer-only,
    bounded loop).
-6. **Reasoning logs (1 min).** Run `python verify.py` — 6/6 — and show the live
+6. **Reasoning logs (1 min).** Run `python verify.py` — 8/8 — and show the live
    trace in the admin panel. Close on: *the model can vary; the authorization boundary remains deterministic.*
 
 ---
