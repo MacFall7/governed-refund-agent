@@ -1,43 +1,64 @@
 """Deterministic gate check — no API key, no network.
 
-Proves the policy gate returns the right verdict for each demo scenario. This is
-the 'correctness does not depend on the model' guarantee: the gate is pure
-Python and fully testable on its own.
+Every case is driven through `propose_refund`, the real execution path the
+agent uses. Nothing here re-implements the gate's logic; the verifier asserts
+against what the gate actually returns, including the state-mutation path
+(an approved refund flips the order to refunded, and a repeat proposal must
+then deny under R3).
 
 Run:  python verify.py
 """
-from tools import propose_refund, _evaluate
-from data import ORDERS
+import hashlib
+import json
 
-# (order_id, expected_decision, label)
-CASES = [
-    ("1001", "APPROVED", "clean refund, 13 days old"),
-    ("1007", "DENIED",   "final-sale item (R2)"),
-    ("1010", "DENIED",   "outside 30-day window (R1)"),
-    ("1012", "DENIED",   "already refunded (R3)"),
-    ("1015", "DENIED",   "second refund within 90 days (R4)"),
-    ("9999", "ESCALATE", "unknown order — fail closed (R6)"),
-]
+from tools import propose_refund
+
+CHECKS_PASSED = 0
+CHECKS_TOTAL = 0
+ROWS = []
+
+
+def check(label: str, expected: str, result: dict, extra_ok: bool = True, extra_note: str = "") -> None:
+    global CHECKS_PASSED, CHECKS_TOTAL
+    got = result["decision"]
+    ok = (got == expected) and extra_ok
+    CHECKS_TOTAL += 1
+    CHECKS_PASSED += ok
+    note = extra_note if extra_note and not extra_ok else ""
+    ROWS.append((expected, got, ok, label + (f"  [{note}]" if note else "")))
 
 
 def main():
-    print(f"{'ORDER':<7}{'EXPECTED':<11}{'GOT':<11}{'OK':<4}LABEL")
-    print("-" * 64)
-    passed = 0
-    for oid, expected, label in CASES:
-        # evaluate without mutating state, except propose_refund executes;
-        # we read the decision via a dry evaluate where the order exists.
-        order = ORDERS.get(oid)
-        if order is None:
-            got = "ESCALATE"
-        else:
-            got = "APPROVED" if _evaluate(order)["approved"] else "DENIED"
-        ok = got == expected
-        passed += ok
-        print(f"{oid:<7}{expected:<11}{got:<11}{'✓' if ok else '✗':<4}{label}")
-    print("-" * 64)
-    print(f"{passed}/{len(CASES)} scenarios correct")
-    raise SystemExit(0 if passed == len(CASES) else 1)
+    # Deny paths first (no state mutation on deny/escalate).
+    check("final-sale item (R2)", "DENIED", propose_refund("1007"))
+    check("outside 30-day window (R1)", "DENIED", propose_refund("1010"))
+    check("already refunded (R3)", "DENIED", propose_refund("1012"))
+    check("second refund within 90 days (R4)", "DENIED", propose_refund("1015"))
+    check("unknown order — fail closed (R6)", "ESCALATE", propose_refund("9999"))
+    check("requested more than paid (R5)", "DENIED",
+          propose_refund("1002", requested_amount=999.99))
+
+    # Approval path: executes the mock refund and mutates state.
+    approved = propose_refund("1001")
+    amount_ok = approved.get("amount_refunded") == 129.99
+    receipt = approved.get("receipt", {})
+    body = {k: receipt[k] for k in ("order_id", "customer_id", "amount", "decision", "issued") if k in receipt}
+    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    receipt_ok = receipt.get("hash") == digest
+    check("clean refund, 13 days old (amount + receipt hash verified)", "APPROVED",
+          approved, extra_ok=amount_ok and receipt_ok,
+          extra_note=f"amount_ok={amount_ok} receipt_ok={receipt_ok}")
+
+    # Post-mutation guarantee: the refund it just executed cannot repeat.
+    check("repeat proposal after approval (R3)", "DENIED", propose_refund("1001"))
+
+    print(f"{'EXPECTED':<11}{'GOT':<11}{'OK':<4}LABEL")
+    print("-" * 72)
+    for expected, got, ok, label in ROWS:
+        print(f"{expected:<11}{got:<11}{'OK' if ok else 'FAIL':<5}{label}")
+    print("-" * 72)
+    print(f"{CHECKS_PASSED}/{CHECKS_TOTAL} scenarios correct")
+    raise SystemExit(0 if CHECKS_PASSED == CHECKS_TOTAL else 1)
 
 
 if __name__ == "__main__":
